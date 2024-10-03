@@ -1,4 +1,5 @@
 import sys
+from email.policy import default
 from msilib import add_stream
 from typing import  Union, Optional
 from operator import  add, sub, mul, truediv
@@ -16,11 +17,18 @@ operations = {
     '/': truediv
 }
 
+error_zero_div = "Division by zero"
+error_undefined = "Result is undefined"
+
+default_font_size = 16
+default_entry_font_size = 40
+
 class Calculator(QMainWindow, Ui_MainWindow):
     def __init__(self):
         super(Calculator, self).__init__()
         self.ui = Ui_MainWindow()
         self.ui.setupUi(self)
+        self.entry_max_len = self.ui.lineEdit.maxLength()
 
         QFontDatabase.addApplicationFont("fonts/Rubik-Regular.ttf")
 
@@ -40,6 +48,8 @@ class Calculator(QMainWindow, Ui_MainWindow):
         self.ui.btnc.clicked.connect(self.clear_all)
         self.ui.btnce.clicked.connect(self.clear_all)
         self.ui.btnpoint.clicked.connect(self.add_point)
+        self.ui.btnneg.clicked.connect(self.negate)
+        self.ui.btnbackspace.clicked.connect(self.backspace)
 
         # math
         self.ui.btn_ravno.clicked.connect(self.calculate)
@@ -50,23 +60,72 @@ class Calculator(QMainWindow, Ui_MainWindow):
 
 
     def add_digit(self, btn_text: str) -> None:
+        self.remove_error()
+        self.clear_temp_if_equality()
         if self.ui.lineEdit.text() == '0':
             self.ui.lineEdit.setText(btn_text)
         else:
             self.ui.lineEdit.setText(self.ui.lineEdit.text() + btn_text)
 
-    def add_point(self) -> None:
-                if '.' not in self.ui.lineEdit.text():
-                    self.ui.lineEdit.setText(self.ui.lineEdit.text() + '.')
+        self.adjust_entry_font_size()
 
+    def add_point(self) -> None:
+        self.clear_temp_if_equality()
+        if '.' not in self.ui.lineEdit.text():
+                    self.ui.lineEdit.setText(self.ui.lineEdit.text() + '.')
+                    self.adjust_entry_font_size()
+
+    def negate(self):
+        self.clear_temp_if_equality()
+        entry = self.ui.lineEdit.text()
+
+        if '-' not in entry:
+            if entry != '0':
+                entry = '-' + entry
+        else:
+            entry = entry[1:]
+
+        if len(entry) == self.entry_max_len + 1 and '-' in entry:
+            self.ui.lineEdit.setMaxLength(self.entry_max_len + 1)
+        else:
+            self.ui.lineEdit.setMaxLength(self.entry_max_len)
+
+        self.ui.lineEdit.setText(entry)
+        self.adjust_entry_font_size()
+
+    def backspace(self) -> None:
+        self.remove_error()
+        self.clear_temp_if_equality()
+        entry = self.ui.lineEdit.text()
+
+        if len(entry) != 1:
+            if len(entry) == 2 and '-' in entry:
+                self.ui.lineEdit.setText('0')
+            else:
+                self.ui.lineEdit.setText(entry[:-1])
+        else:
+            self.ui.lineEdit.setText('0')
+
+            self.adjust_entry_font_size()
 
     def clear_all(self) -> None:
+        self.remove_error()
+        self.clear_temp_if_equality()
         self.ui.lineEdit.setText('0')
+        self.adjust_entry_font_size()
         self.ui.label.clear()
 
     def clear_entry(self) -> None:
+            self.remove_error()
+            self.clear_temp_if_equality()
             self.ui.lineEdit.setText('0')
+            self.adjust_entry_font_size()
             self.ui.label.clear()
+
+    def clear_temp_if_equality(self) -> None:
+        if self.get_math_sign() == '=':
+            self.ui.label.clear()
+
 
     @staticmethod
     def remove_trailing_zeros(num: str) -> str:
@@ -77,6 +136,7 @@ class Calculator(QMainWindow, Ui_MainWindow):
         if not self.ui.label.text() or self.get_math_sign() == '=':
             self.ui.label.setText(self.remove_trailing_zeros(self.ui.lineEdit.text()) + f' {math_sign} ')
             self.ui.lineEdit.setText('0')
+            self.adjust_entry_font_size()
 
     def get_entry_num(self) -> Union[int, float]:
         entry = self.ui.lineEdit.text().strip('.')
@@ -92,19 +152,33 @@ class Calculator(QMainWindow, Ui_MainWindow):
         if self.ui.label.text():
             return self.ui.label.text().strip('.').split()[-1]
 
+    def get_entry_text_width(self) -> int:
+        return self.ui.lineEdit.fontMetrics().boundingRect(self.ui.lineEdit.text()).width()
+
+    def get_entry_text_width(self) -> int:
+        return self.ui.label.fontMetrics().boundingRect(self.ui.lineEdit.text()).width()
 
     def calculate(self) -> Optional[str]:
         entry = self.ui.lineEdit.text()
         temp = self.ui.label.text()
 
         if temp:
-            result = self.remove_trailing_zeros(
-                str(operations[self.get_math_sign()](self.get_temp_num(), self.get_entry_num()))
-            )
-            self.ui.label.setText(temp + self.remove_trailing_zeros(entry) + ' =')
-            self.ui.lineEdit.setText(result)
-            return result
+            try:
+                result = self.remove_trailing_zeros(
+                    str(operations[self.get_math_sign()](self.get_temp_num(), self.get_entry_num()))
+                )
+                self.ui.label.setText(temp + self.remove_trailing_zeros(entry) + ' =')
+                self.ui.lineEdit.setText(result)
+                self.adjust_entry_font_size()
+                return result
 
+            except KeyError:
+                pass
+            except ZeroDivisionError:
+                if self.get_temp_num() == 0:
+                    self.show_error(error_undefined)
+                else:
+                    self.show_error(error_zero_div)
     def math_operation(self, math_sign: str):
         temp = self.ui.label.text()
 
@@ -119,6 +193,46 @@ class Calculator(QMainWindow, Ui_MainWindow):
             else:
                 self.ui.label.setText(self.calculate()+ f' {math_sign} ')
 
+    def show_error(self, text: str) -> None:
+        self.ui.lineEdit.setMaxLength(len(text))
+        self.ui.lineEdit.setText(text)
+        self.adjust_entry_font_size()
+        self.disable_buttons(True)
+
+    def remove_error(self) -> None:
+        if self.ui.lineEdit.text() in (error_undefined, error_zero_div):
+            self.ui.lineEdit.setMaxLength(self.entry_max_len)
+            self.ui.lineEdit.setText('0')
+            self.adjust_entry_font_size()
+            self.disable_buttons(False)
+
+    def disable_buttons(self, disable: bool) -> None:
+        self.ui.btnplus.setDisabled(disable)
+        self.ui.btndeliti.setDisabled(disable)
+        self.ui.btnx.setDisabled(disable)
+        self.ui.btnneg.setDisabled(disable)
+        self.ui.btnpoint.setDisabled(disable)
+        self.ui.btnminus.setDisabled(disable)
+        self.ui.btnpoint.setDisabled(disable)
+
+        color = 'color: #888;' if disable else 'color: white;'
+        self.change_buttons_color(color)
+
+    def change_buttons_color(self, css_color: str) -> None:
+        self.ui.btnplus.setStyleSheet(css_color)
+        self.ui.btndeliti.setStyleSheet(css_color)
+        self.ui.btnx.setStyleSheet(css_color)
+        self.ui.btnneg.setStyleSheet(css_color)
+        self.ui.btnpoint.setStyleSheet(css_color)
+        self.ui.btnminus.setStyleSheet(css_color)
+        self.ui.btnpoint.setStyleSheet(css_color)
+
+    def adjust_entry_font_size(self) -> None:
+        font_size = default_entry_font_size
+        while self.get_entry_text_width() > self.ui.lineEdit.width():
+
+            font_size -= 1
+            self.ui.lineEdit.setStyleSheet('font-size:' + str(font_size) + 'pt; border: none;')
 
 if __name__ == '__main__':
     app = QApplication(sys.argv)
